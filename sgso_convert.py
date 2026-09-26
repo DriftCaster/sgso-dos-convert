@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""SG Space Octet DOS Convert Tool, by coffee.crisp.
+"""SG Variant Space Octet DOS Convert Tool, by coffee.crisp.
 
 Turns your own copy of STEINS;GATE 8bit (English) into a DOS version for real PCs
 (8086+, VGA), split over floppy disks.
@@ -59,15 +59,15 @@ def check_install():
                 "sgso_convert.bat (Windows) or sgso_convert.sh (Linux) from the extracted folder,\n"
                 "or use the single-file sgso_convert.pyz instead.")
 
-APP_NAME = 'SG Space Octet DOS Convert Tool'
-VERSION = '1.3'
+APP_NAME = 'SG Variant Space Octet DOS Convert Tool'
+VERSION = '1.5'
 
 # Build choices: (key, label, [(value, choice label)], default index)
 BUILD = [
-    ('pictures', 'Picture palette', [('colour', 'Colour (8-colour PC-8801 palette)'),
-                              ('mono', 'Monochrome (MZ-2000 green screen)')], 0),
-    ('rendering', 'Picture rendering', [('authentic', 'Authentic / faithful original renderer'),
-                                        ('smooth', 'Smooth / Enhanced / anti-aliased')], 0),
+    ('pictures', 'Pictures', [('colour', 'Shaded (8-colour PC-8801; shows as grey shades on a mono screen)'),
+                              ('mono', 'Two-colour dithered (MZ-2000 look)')], 0),
+    ('rendering', 'Rendering', [('authentic', 'Authentic (hard edges, as the original)'),
+                                ('smooth', 'Smooth (anti-aliased, not original)')], 0),
     ('floppy', 'Floppy type', [('1.44M', '3.5" 1.44 MB (HD)'), ('720K', '3.5" 720 KB (DD)'),
                                ('1.2M', '5.25" 1.2 MB (HD)'), ('360K', '5.25" 360 KB (DD)'),
                                ('2.88M', '3.5" 2.88 MB (ED)')], 0),
@@ -94,14 +94,14 @@ SETTINGS = [
     ('voleffects', 'Effects volume', [('2', 'Loud'), ('1', 'Soft'), ('0', 'Off')], 0),
 ]
 
-README = """SG Space Octet DOS
+README = """SG Variant Space Octet DOS
 by coffee.crisp
-=================
+==============================
 
-STEINS;GATE 8bit, running on DOS the way it looked in its PC-8801 mode:
-8 colour dithered pictures with scanlines (or the green screen look), the
-game's own PC-8801 font, the 3 line text window and the function key bar.
-Music plays on the PC speaker or an AdLib / Sound Blaster.
+STEINS;GATE Variant Space Octet, running on DOS the way it looked in its
+PC-8801 mode: 8 colour dithered pictures with scanlines (or the shaded
+monochrome look), the game's own PC-8801 font, the 3 line text window and
+the function key bar. Music plays on the PC speaker or an AdLib card.
 
 You need an 8086 or better, DOS 3.3+, VGA, about 420 KB of free
 conventional memory and about {size} MB of disk space.
@@ -127,8 +127,8 @@ Fan project, not affiliated with MAGES. or 5pb. No game data is included:
 these files were made from your own copy of the game.
 """
 
-INSTALL = """SG Space Octet DOS - installation
-=================================
+INSTALL = """SG Variant Space Octet DOS - installation
+=========================================
 
 This set has {n} disk(s) of {fmt}. {notes}
 
@@ -191,12 +191,11 @@ def run(game, outdir, choices, folders=True, images=True, harddisk=True, log=pri
     c = {k: choices.get(k, o[d][0]) for k, _l, o, d in BUILD + SETTINGS}
     log(f"{APP_NAME} {VERSION} - reading {game}")
     data = find_xp3(game)
-    files = convert.convert_all(data, log, progress, mono=c['pictures'] == 'mono', smooth=c['rendering'] == 'smooth')
+    files = convert.convert_all(data, log, progress, mono=c['pictures'] == 'mono',
+                                smooth=c['rendering'] == 'smooth')
     for n in ('SG8.EXE', 'SETUP.EXE', 'INSTALL.EXE'):
         files[n] = resource('dos/' + n)
-    if c['size'] == 'light' or c['rendering'] == 'smooth':
-        # Enhanced rendering is a final anti-aliased image, not a replay of the
-        # original vector drawing.  Do not pair it with the authentic draw-data.
+    if c['size'] == 'light':
         files.pop('SG8.VEC', None)
     files['SG8.CFG'] = make_cfg(c)
     size = sum(len(files[n]) for n in GAME_ORDER if n in files) / 1e6
@@ -205,10 +204,8 @@ def run(game, outdir, choices, folders=True, images=True, harddisk=True, log=pri
     fmt = c['floppy']
     note = []
     if c['size'] == 'light': note.append("Light set: pictures appear at once.")
-    if c['pictures'] == 'mono': note.append("Monochrome pictures (green-screen mode).")
-    if c['rendering'] == 'smooth':
-        note.append("Smooth / Enhanced pictures: anti-aliased rendering, reduced to the selected DOS palette; not the original renderer.")
-        note.append("Enhanced mode shows pictures at once; drawing replay is disabled.")
+    if c['pictures'] == 'mono': note.append("Two-colour dithered pictures (MZ-2000 look).")
+    if c['rendering'] == 'smooth': note.append("Smooth anti-aliased pictures.")
     os.makedirs(outdir, exist_ok=True)
     if folders or images:
         files['INSTALL.TXT'] = b''
