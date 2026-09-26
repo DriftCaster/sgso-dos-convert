@@ -150,7 +150,7 @@ int main(void)
 {
     int i, j, r, bad = 0, done = 1;
     mktable();
-    printf("SG Space Octet DOS - installation\n\n");
+    printf("SG Variant Space Octet DOS - installation\n\n");
     if (!load_list()) {
         printf("INSTALL.LST not found: copy all the floppies into this folder first.\n");
         return 1;

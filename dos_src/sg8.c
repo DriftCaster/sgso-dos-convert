@@ -1,10 +1,10 @@
 /*
- * SG8.EXE - SG Space Octet DOS, game engine for STEINS;GATE 8bit (English). By coffee.crisp.
+ * SG8.EXE - SG Variant Space Octet DOS, game engine for STEINS;GATE 8bit (English). By coffee.crisp.
  * Reproduces the original game in its recommended PC-8801 mkIISR mode: 640x200 pictures
  * in 8 digital colours with dither tiles, doubled to 400 lines with the darkened
  * scanlines of the original, the game's PC-8801 font, 3-line text window and
  * function key bar. Runs in VGA mode 12h (640x480, 16 colours) on any 8086+.
- * Data: SG8.SCN, SG8.IMG, SG8.VEC, SG8.FNT, SG8.MUS, produced by sg8conv.py.
+ * Data: SG8.SCN, SG8.IMG, SG8.VEC, SG8.FNT, SG8.MUS, produced by the convert tool.
  * Build: wcl -bt=dos -ml -0 -ox sg8.c
  */
 #include <stdio.h>
@@ -138,18 +138,10 @@ static u8 current_mode(void)
     return r.h.al;
 }
 
-/* set_mode(0x12) asks for 640x480x16 VGA graphics. On real MDA/CGA/EGA/Hercules
-   hardware -- or an emulator configured for one of those instead of VGA --
-   the BIOS simply leaves the previous (text) mode in place and returns no
-   error code of any kind, so the game used to carry on and draw into video
-   memory nothing was ever going to display: a silent black screen with sound
-   still running, because the sound code does not touch the video BIOS at
-   all. This checks that the mode actually took and fails loudly in text
-   mode instead, so "black screen" turns into a message that says why. This
-   is a hardware requirement, not a colour setting -- /GREY, /GREEN and
-   /AMBER only choose a tint for a genuinely monochrome VGA *monitor*
-   plugged into real VGA silicon; they cannot make an MDA/CGA/EGA/Hercules
-   adapter (or an emulator's non-VGA machine type) show a VGA-only mode. */
+/* Mode 12h (640x480x16) exists only on VGA. On MDA/CGA/EGA/Hercules -- or an
+   emulator set to one of those -- the BIOS leaves the previous mode in place and
+   reports no error, so drawing would go to memory that is never displayed. This
+   checks the mode actually took and exits with a message instead. */
 static void require_vga(void)
 {
     if (current_mode() == 0x12) return;
@@ -673,22 +665,17 @@ static int getkey(void)
     return r.x.ax & 0xFF00;
 }
 
-/* Was: int86(0x16, AH=1) with the result tested via "r.x.cflag & INTR_ZF".
-   INT 16h/AH=1 reports "no key waiting" through the ZERO flag, not the carry
-   flag, and INTR_ZF was never defined anywhere in this file -- this failed
-   to compile at all, and any earlier binary that behaved this way could
-   only have been reading `cflag` (which Watcom's int86() sets to 0/1 from
-   the carry bit alone) against a stray bit that is never set, so the test
-   was either always false or undefined. In both cases keyready() could
-   falsely report "no key" while a key (or a stale one) was still sitting in
-   the buffer, which is what produced the intermittent skipped/batched text:
-   type_delay() would sit past its own point of return, then several
-   characters would flush out together once a key finally registered.
-   _bios_keybrd(_KEYBRD_READY) is the portable, documented way to poll the
-   keyboard buffer without touching the flags register directly. */
 static int keyready(void)
 {
     return _bios_keybrd(_KEYBRD_READY) != 0;
+}
+
+/* Discards keys already waiting in the BIOS buffer. Called before a line is typed
+   out so that keys pressed earlier (holding or tapping Enter through a page wait)
+   do not immediately cancel the typewriter effect on the following lines. */
+static void kbd_flush(void)
+{
+    while (_bios_keybrd(_KEYBRD_READY)) _bios_keybrd(_KEYBRD_READ);
 }
 
 static int shift_down(void)
@@ -834,7 +821,7 @@ static void print_toks(const Tok *t, int n, int typed, int voice)
     int i = 0;
     u32 due = 0;
     if (typed && (!opt_chms || !timer_hooked)) typed = 0;
-    if (typed) due = now_ms();
+    if (typed) { kbd_flush(); due = now_ms(); }
     while (i < n) {
         int j = i, w = 0;
         while (j < n && !(!t[j].zen && t[j].v == ' ')) { w += t[j].zen ? 2 : 1; j++; }
@@ -847,8 +834,6 @@ static void print_toks(const Tok *t, int n, int typed, int voice)
             i++;
         }
         while (i < n && !t[i].zen && t[i].v == ' ') {
-            /* Spaces at the right edge are formatting, not printable content.
-               Consume them without letting the cursor cross the box boundary. */
             if (tx_col < TX_COLS) {
                 put_tok(t[i]);
                 if (typed && !type_delay(0, voice, &due)) typed = 0;
@@ -1897,7 +1882,7 @@ static void boot_screen(void)
 
 static void usage(void)
 {
-    printf("SG8 - SG Space Octet DOS - demake by coffee.crisp\n"
+    printf("SG8 - SG Variant Space Octet DOS - by coffee.crisp\n"
            "  SG8 [options]\n"
            "  /V:n    picture drawing: 0 instant, 1 fast, 2 PC-8801 (default), 3 slow machines\n"
            "  /C:n    text speed in ms per letter (default 25, 0 = instant)\n"

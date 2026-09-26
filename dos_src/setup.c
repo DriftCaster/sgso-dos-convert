@@ -1,5 +1,5 @@
 /*
- * SETUP.EXE - settings for SG8.EXE (SG Space Octet DOS). By coffee.crisp.
+ * SETUP.EXE - settings for SG8.EXE (SG Variant Space Octet DOS). By coffee.crisp.
  * Text-mode menu that detects the hardware and writes SG8.CFG.
  * Build: wcl -bt=dos -ms -0 -ox setup.c -fe=SETUP.EXE
  */
@@ -251,7 +251,7 @@ static void draw(int sel, int colour, int adlib_ok, u16 kb, const char *msg)
     char buf[80];
     for (y = 0; y < 25; y++) fill_line(y, A_TEXT);
     fill_line(0, A_TITLE);
-    put_str(2, 0, "SG Space Octet DOS - Setup                 Demake by coffee.crisp", A_TITLE);
+    put_str(2, 0, "SG Variant Space Octet DOS - Setup            by coffee.crisp", A_TITLE);
     sprintf(buf, "Display: %s VGA    AdLib/Sound Blaster: %s    Free memory: %u KB%s",
             colour ? "colour" : "monochrome", adlib_ok ? "found" : "not found", kb,
             kb < 420 ? " (low!)" : "");
