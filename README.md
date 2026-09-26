@@ -28,7 +28,7 @@ The server is primarily for a game I'm currently developing with **GDScript on G
 
 ## What you need
 
-- Python 3.8 or newer, with numpy (`pip install numpy`)
+- Python 3.8 or newer, with numpy (`pip install numpy`). Smooth / Enhanced mode additionally needs CairoSVG and Pillow (`pip install -r requirements-enhanced.txt`).
 - your copy of the game (the `data.xp3` file, the game folder, or the zip it came in)
 - on the DOS side: 8086+, DOS 3.3+, VGA, about 420 KB of free memory and 3 to 5 MB of disk space
 
@@ -54,12 +54,14 @@ The full step by step is in [GUIDE.md](GUIDE.md). Developer notes and architectu
 
 When converting:
 
-- **Pictures**: colour (PC-8801) or monochrome (MZ-2000 green screen)
+- **Picture palette**: Colour (the 8-colour PC-8801 palette) or Monochrome (the MZ-2000 green-screen palette).
+- **Picture rendering**: Authentic (the faithful blocky/dithered renderer) or **Smooth / Enhanced** (anti-aliased SVG rendering). Smooth works with either palette and is explicitly an enhancement, **not** how the original game rendered its pictures.
+- Smooth / Enhanced mode shows pictures immediately rather than replaying the original drawing animation.
 - **Floppy type**: 3.5" 1.44 MB, 720 KB, 2.88 MB, or 5.25" 1.2 MB, 360 KB
 - **Compression**: fewer disks, `INSTALL` unpacks everything on the DOS side
 - **Drawing data**: keep it to see pictures being drawn, or leave it out to save space
 
-Game settings (you can change these later with `SETUP` on the DOS machine): screen (colour, grey for plasma and LCD screens, green, amber), scanlines, drawing and text speed, typing beep, sound device, volumes.
+Game settings (you can change these later with `SETUP` on the DOS machine): screen (colour, grey for plasma and LCD screens, green, amber), scanlines, drawing and text speed, typing beep, sound device, volumes. The build-time picture palette and rendering choice are stored in the generated image data.
 
 With compression on, the full game fits on 2 disks of 1.44 MB, 4 of 720 KB or 6 of 360 KB.
 
@@ -78,6 +80,7 @@ Example: `python sgso_convert.py sg8.zip out --floppy 720K --pictures mono --sou
 - `lib/`: the converter itself (archive reader, script compiler, picture renderer, music, font, floppy images)
 - `dos/`: the DOS programs `SG8.EXE`, `SETUP.EXE` and `INSTALL.EXE`
 - `dos_src/`: their C source, built with Open Watcom (`wcl -bt=dos -ml -0 -ox sg8.c`)
+- `note/`: architecture, testing, beginner notes, and release notes
 
 ## Legal stuff
 

@@ -65,3 +65,19 @@ The DOS C programs require an old-DOS-compatible compiler such as Open Watcom. T
 ## Important compatibility boundary
 
 The converter deliberately does **not** include the commercial game data. The user supplies their own copy of `data.xp3`.
+
+
+## Picture rendering modes
+
+The converter now separates **picture palette** from **picture rendering**.
+The palette can be Colour (8 PC-8801 digital colours) or Monochrome (the
+green-screen palette), while rendering can be Authentic or Smooth / Enhanced.
+
+`lib/pc88draw.py` keeps the original renderer as the default path. Smooth /
+Enhanced uses CairoSVG to rasterize the source SVG with anti-aliasing and then
+quantizes the result into the selected DOS palette. It is intentionally not
+presented as historically accurate.
+
+Because the enhanced result is a final raster image rather than the original
+vector replay, `sgso_convert` removes `SG8.VEC` for Smooth mode so pictures
+appear immediately instead of showing an unrelated drawing animation.

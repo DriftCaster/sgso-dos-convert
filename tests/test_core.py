@@ -76,3 +76,42 @@ def test_floppy_plan_rejects_missing_ordered_file():
         assert "missing file" in str(exc)
     else:
         raise AssertionError("missing file was accepted")
+
+
+def test_pc88draw_smooth_optional():
+    # Smooth mode is optional and must not become a requirement for normal use.
+    try:
+        import cairosvg  # noqa: F401
+        import PIL  # noqa: F401
+    except ImportError:
+        return
+    svg = b'''<svg xmlns="http://www.w3.org/2000/svg" width="640" height="400">
+      <rect x="0" y="0" width="640" height="400" fill="#ffffff"/>
+      <path d="M 40 40 L 600 80 L 300 360 Z" fill="#ff0000"/>
+    </svg>'''
+    idx, elements = pc88draw.render(svg, smooth=True)
+    assert idx.shape == (200, 640)
+    assert idx.min() >= 0 and idx.max() <= 7
+    assert elements == []
+
+
+def test_pc88draw_smooth_monochrome_optional():
+    try:
+        import cairosvg  # noqa: F401
+        import PIL  # noqa: F401
+    except ImportError:
+        return
+    svg = b'''<svg xmlns="http://www.w3.org/2000/svg" width="640" height="400">
+      <rect x="0" y="0" width="640" height="400" fill="#808080"/>
+    </svg>'''
+    idx, elements = pc88draw.render(svg, mono=True, smooth=True)
+    assert idx.shape == (200, 640)
+    assert set(idx.flat).issubset({0, 7})
+    assert elements == []
+
+
+def test_text_runtime_has_no_silent_token_overflow():
+    source = (ROOT / "dos_src" / "sg8.c").read_text(encoding="utf-8")
+    assert "static Tok t[1024]" in source
+    assert "m < 1024 - 1" in source
+    assert "m < 1024 - MAX_INPUT" in source

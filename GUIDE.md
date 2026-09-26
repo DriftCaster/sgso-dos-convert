@@ -33,7 +33,8 @@ Double-click `sgso_convert.pyz` (or run `python sgso_convert.pyz`). If you downl
 1. **Your game**: click File... or Folder... and pick it.
 2. **Output folder**: where the result goes.
 3. **Build**:
-   - Pictures: Colour, or Monochrome for the green screen look
+   - **Picture palette**: Colour, or Monochrome for the green-screen look
+   - **Picture rendering**: Authentic for the faithful blocky/dithered renderer, or **Smooth / Enhanced** for anti-aliased rendering. Smooth can be used with either palette.
    - Floppy type: whatever your DOS PC has. An IBM P70 or most 386/486 PCs take 3.5" 1.44 MB.
    - Compression: leave it on unless your DOS PC is really slow (an old 8086 can take a few minutes to unpack)
    - Drawing data: Full shows the pictures being drawn, Light saves a disk

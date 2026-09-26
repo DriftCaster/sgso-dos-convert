@@ -206,9 +206,60 @@ def _line(img, x0, y0, x1, y1, c):
         if e2 >= dy: err += dy; x0 += sx
         if e2 <= dx: err += dx; y0 += sy
 
-def render(svg_bytes, mono=False, gamma=1.0):
+def _smooth_rgb(svg_bytes, gamma=1.0, mono=False):
+    """Render the source SVG with CairoSVG for an enhanced, anti-aliased image.
+
+    This is intentionally separate from the original PC-8801 renderer.  The
+    DOS image format still has an 8-colour palette, so the RGB result is
+    reduced back to that palette by ``render(..., smooth=True)``.
+    """
+    try:
+        import cairosvg
+        from PIL import Image
+        import io
+    except ImportError as exc:
+        raise RuntimeError(
+            "Smooth / Enhanced rendering needs CairoSVG and Pillow. "
+            "Install them with: pip install cairosvg pillow"
+        ) from exc
+
+    # Render at 2x and downsample.  This gives Cairo more information at
+    # polygon edges before the result is reduced to the DOS palette.
+    png = cairosvg.svg2png(bytestring=svg_bytes, output_width=W * 2, output_height=H * 2)
+    image = Image.open(io.BytesIO(png)).convert("RGB")
+    image = image.resize((W, H), Image.Resampling.LANCZOS)
+    rgb = np.asarray(image, dtype=np.float32) / 255.0
+
+    if gamma != 1.0:
+        rgb = np.clip(rgb, 0.0, 1.0) ** (1.0 / gamma)
+
+    # Quantize the enhanced image into the selected DOS palette.  Anti-aliased
+    # edge pixels therefore never introduce unsupported colours.
+    if mono:
+        lum = np.sum(rgb * np.asarray([0.29891, 0.58661, 0.11448], dtype=np.float32), axis=2)
+        return np.where(lum >= 0.5, 7, 0).astype(np.uint8)
+
+    pal = np.asarray(_PAL_RGB, dtype=np.float32) / 255.0
+    lum_weights = np.asarray([0.29891, 0.58661, 0.11448], dtype=np.float32)
+    # Use RGB distance for the enhanced renderer; this preserves coloured edges
+    # better than the historical luminance-only palette selection.
+    diff = rgb[:, :, None, :] - pal[None, None, :, :]
+    dist = np.sum(diff * diff, axis=3)
+    return np.argmin(dist, axis=2).astype(np.uint8)
+
+
+
+def render(svg_bytes, mono=False, gamma=1.0, smooth=False):
     """mono: two-colour rendering of the green-monitor machines; gamma: the picture's
     monochrome gamma correction (evimage/_cgprops.tjs)."""
+    if smooth:
+        # Enhanced mode uses a modern SVG renderer, while the normal path below
+        # remains the byte-for-byte-oriented PC-8801/MZ rendering logic.
+        idx = _smooth_rgb(svg_bytes, gamma, mono=mono)
+        # Smooth mode is an enhanced final-image mode; there is no faithful
+        # vector replay to attach to it.
+        return idx, []
+
     s = svg_bytes.decode('utf-8', 'replace')
     s = re.sub(r'<!DOCTYPE.*?\]>', '', s, flags=re.S)
     s = re.sub(r'&ns_[a-z_]+;', 'http://ns.invalid/', s)

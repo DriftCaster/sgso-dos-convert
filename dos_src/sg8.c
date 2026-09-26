@@ -13,6 +13,7 @@
 #include <ctype.h>
 #include <dos.h>
 #include <conio.h>
+#include <bios.h>
 #include <malloc.h>
 #include <math.h>
 #include <signal.h>
@@ -127,6 +128,39 @@ static void set_mode(u8 m)
     union REGS r;
     r.h.ah = 0; r.h.al = m;
     int86(0x10, &r, &r);
+}
+
+static u8 current_mode(void)
+{
+    union REGS r;
+    r.h.ah = 0x0F;
+    int86(0x10, &r, &r);
+    return r.h.al;
+}
+
+/* set_mode(0x12) asks for 640x480x16 VGA graphics. On real MDA/CGA/EGA/Hercules
+   hardware -- or an emulator configured for one of those instead of VGA --
+   the BIOS simply leaves the previous (text) mode in place and returns no
+   error code of any kind, so the game used to carry on and draw into video
+   memory nothing was ever going to display: a silent black screen with sound
+   still running, because the sound code does not touch the video BIOS at
+   all. This checks that the mode actually took and fails loudly in text
+   mode instead, so "black screen" turns into a message that says why. This
+   is a hardware requirement, not a colour setting -- /GREY, /GREEN and
+   /AMBER only choose a tint for a genuinely monochrome VGA *monitor*
+   plugged into real VGA silicon; they cannot make an MDA/CGA/EGA/Hercules
+   adapter (or an emulator's non-VGA machine type) show a VGA-only mode. */
+static void require_vga(void)
+{
+    if (current_mode() == 0x12) return;
+    set_mode(3);
+    fputs("This game needs a VGA graphics card (mode 12h, 640x480x16).\n"
+          "Your video BIOS did not accept that mode -- if you are using an\n"
+          "emulator, check that it is configured for a VGA machine type\n"
+          "(not MDA/CGA/EGA/Hercules). A monochrome VGA monitor is fine;\n"
+          "use /GREY, /GREEN or /AMBER once the mode itself is working.\n",
+          stdout);
+    quit_game(1);
 }
 
 /* Active display from the VGA BIOS: 1 = colour, 0 = monochrome (plasma, mono VGA). */
@@ -639,12 +673,22 @@ static int getkey(void)
     return r.x.ax & 0xFF00;
 }
 
+/* Was: int86(0x16, AH=1) with the result tested via "r.x.cflag & INTR_ZF".
+   INT 16h/AH=1 reports "no key waiting" through the ZERO flag, not the carry
+   flag, and INTR_ZF was never defined anywhere in this file -- this failed
+   to compile at all, and any earlier binary that behaved this way could
+   only have been reading `cflag` (which Watcom's int86() sets to 0/1 from
+   the carry bit alone) against a stray bit that is never set, so the test
+   was either always false or undefined. In both cases keyready() could
+   falsely report "no key" while a key (or a stale one) was still sitting in
+   the buffer, which is what produced the intermittent skipped/batched text:
+   type_delay() would sit past its own point of return, then several
+   characters would flush out together once a key finally registered.
+   _bios_keybrd(_KEYBRD_READY) is the portable, documented way to poll the
+   keyboard buffer without touching the flags register directly. */
 static int keyready(void)
 {
-    union REGS r;
-    r.h.ah = 1;
-    int86(0x16, &r, &r);
-    return !(r.x.cflag & INTR_ZF);
+    return _bios_keybrd(_KEYBRD_READY) != 0;
 }
 
 static int shift_down(void)
@@ -803,7 +847,12 @@ static void print_toks(const Tok *t, int n, int typed, int voice)
             i++;
         }
         while (i < n && !t[i].zen && t[i].v == ' ') {
-            if (tx_col < TX_COLS) { put_tok(t[i]); if (typed && !type_delay(0, voice, &due)) typed = 0; }
+            /* Spaces at the right edge are formatting, not printable content.
+               Consume them without letting the cursor cross the box boundary. */
+            if (tx_col < TX_COLS) {
+                put_tok(t[i]);
+                if (typed && !type_delay(0, voice, &due)) typed = 0;
+            }
             i++;
         }
     }
@@ -827,7 +876,7 @@ static void text_line(const Tok *t, int n, int typed, int voice)
 
 static void con_print(const char *s)
 {
-    static Tok t[160];
+    static Tok t[1024];
     int n = str_toks(s, t, 160);
     text_line(t, n, 1, 0);
 }
@@ -835,7 +884,7 @@ static void con_print(const char *s)
 /* A line of the DOS-only menus: shown at once, without waiting. */
 static void con_status(const char *s)
 {
-    static Tok t[160];
+    static Tok t[1024];
     int n = str_toks(s, t, 160);
     if (tx_col > 0) tx_newline();
     print_toks(t, n, 0, 0);
@@ -1652,13 +1701,13 @@ static int eval_expr(u8 far *e, int len)
 
 static void text_op(u8 far *s, u16 n)
 {
-    static Tok t[400];
+    static Tok t[1024];
     u16 i, m = 0;
     int voice = 0;
-    for (i = 0; i < n && m < 400 - MAX_INPUT; i++) {
+    for (i = 0; i < n && m < 1024 - MAX_INPUT; i++) {
         if (s[i] == 1) {                        /* last command entered */
             char *p = last_input;
-            while (*p) { t[m].zen = 0; t[m].v = (u8)*p++; m++; }
+            while (*p && m < 1024 - 1) { t[m].zen = 0; t[m].v = (u8)*p++; m++; }
         } else if (s[i] == 2 && i + 1 < n) {    /* voice of the speaking character */
             voice = s[++i] - '0';
         } else if (s[i] == 3 && i + 1 < n) {    /* full-width character */
@@ -1908,6 +1957,7 @@ int main(int argc, char **argv)
     sound_init();
 
     set_mode(0x12);
+    require_vga();
     set_palette();
     con_clear();
     clear_image();

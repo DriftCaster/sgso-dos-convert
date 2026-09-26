@@ -377,10 +377,10 @@ def parse_gamma(files):
         g[m.group(1).lower()] = float(m.group(2))
     return g
 
-def build_images(files, ctx, log, mono=False):
+def build_images(files, ctx, log, mono=False, smooth=False):
     """SG8.IMG (final pictures) and SG8.VEC (element order for the drawing replay),
-    both rendered like the original engine: PC-8801 colours, or the two-colour
-    green-monitor mode with each picture's gamma correction (see pc88draw.py)."""
+    rendered with the authentic PC-8801/MZ logic, or with the optional enhanced
+    anti-aliased SVG renderer. Enhanced mode is reduced to the DOS 8-colour palette."""
     import pc88draw
     gam = parse_gamma(files)
     imgs, vecs = [], []
@@ -388,7 +388,7 @@ def build_images(files, ctx, log, mono=False):
         src = files.get(f'evimage/{n}.svg')
         if src is None:
             log(f"  missing image skipped: {n}"); imgs.append(b''); vecs.append(b''); continue
-        idx, els = pc88draw.render(src, mono, gam.get(n, 1.0))
+        idx, els = pc88draw.render(src, mono, gam.get(n, 1.0), smooth=smooth)
         imgs.append(planar3_rle(idx))
         out = bytearray()
         for kind, fcols, scol, figs in els:
@@ -584,7 +584,7 @@ def build_mus(files, ctx, log):
             for d, n in ev: data += struct.pack('<HH', d, n)
     return bytes(out + data)
 
-def convert_all(xp3_data, log=print, progress=None, mono=False):
+def convert_all(xp3_data, log=print, progress=None, mono=False, smooth=False):
     """Converts data.xp3 into the SG8 data files. Returns {file name: bytes}."""
     files = read_xp3(xp3_data)
     if 'image/font_han1x2z.tft' not in files or 'scenario/sg0.txt' not in files:
@@ -598,5 +598,5 @@ def convert_all(xp3_data, log=print, progress=None, mono=False):
     log("Building the font...")
     out['SG8.FNT'] = build_font(files, ctx, log)
     log(f"Drawing {len(ctx.images)} pictures...")
-    out['SG8.IMG'], out['SG8.VEC'] = build_images(files, ctx, progress or (lambda m: None), mono)
+    out['SG8.IMG'], out['SG8.VEC'] = build_images(files, ctx, progress or (lambda m: None), mono, smooth)
     return out

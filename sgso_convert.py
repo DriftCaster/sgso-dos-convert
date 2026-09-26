@@ -60,12 +60,14 @@ def check_install():
                 "or use the single-file sgso_convert.pyz instead.")
 
 APP_NAME = 'SG Space Octet DOS Convert Tool'
-VERSION = '1.1'
+VERSION = '1.3'
 
 # Build choices: (key, label, [(value, choice label)], default index)
 BUILD = [
-    ('pictures', 'Pictures', [('colour', 'Colour (PC-8801, 8 colours)'),
+    ('pictures', 'Picture palette', [('colour', 'Colour (8-colour PC-8801 palette)'),
                               ('mono', 'Monochrome (MZ-2000 green screen)')], 0),
+    ('rendering', 'Picture rendering', [('authentic', 'Authentic / faithful original renderer'),
+                                        ('smooth', 'Smooth / Enhanced / anti-aliased')], 0),
     ('floppy', 'Floppy type', [('1.44M', '3.5" 1.44 MB (HD)'), ('720K', '3.5" 720 KB (DD)'),
                                ('1.2M', '5.25" 1.2 MB (HD)'), ('360K', '5.25" 360 KB (DD)'),
                                ('2.88M', '3.5" 2.88 MB (ED)')], 0),
@@ -189,10 +191,12 @@ def run(game, outdir, choices, folders=True, images=True, harddisk=True, log=pri
     c = {k: choices.get(k, o[d][0]) for k, _l, o, d in BUILD + SETTINGS}
     log(f"{APP_NAME} {VERSION} - reading {game}")
     data = find_xp3(game)
-    files = convert.convert_all(data, log, progress, mono=c['pictures'] == 'mono')
+    files = convert.convert_all(data, log, progress, mono=c['pictures'] == 'mono', smooth=c['rendering'] == 'smooth')
     for n in ('SG8.EXE', 'SETUP.EXE', 'INSTALL.EXE'):
         files[n] = resource('dos/' + n)
-    if c['size'] == 'light':
+    if c['size'] == 'light' or c['rendering'] == 'smooth':
+        # Enhanced rendering is a final anti-aliased image, not a replay of the
+        # original vector drawing.  Do not pair it with the authentic draw-data.
         files.pop('SG8.VEC', None)
     files['SG8.CFG'] = make_cfg(c)
     size = sum(len(files[n]) for n in GAME_ORDER if n in files) / 1e6
@@ -202,6 +206,9 @@ def run(game, outdir, choices, folders=True, images=True, harddisk=True, log=pri
     note = []
     if c['size'] == 'light': note.append("Light set: pictures appear at once.")
     if c['pictures'] == 'mono': note.append("Monochrome pictures (green-screen mode).")
+    if c['rendering'] == 'smooth':
+        note.append("Smooth / Enhanced pictures: anti-aliased rendering, reduced to the selected DOS palette; not the original renderer.")
+        note.append("Enhanced mode shows pictures at once; drawing replay is disabled.")
     os.makedirs(outdir, exist_ok=True)
     if folders or images:
         files['INSTALL.TXT'] = b''
