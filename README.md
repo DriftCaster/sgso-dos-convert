@@ -57,7 +57,7 @@ Step by step instructions are in [GUIDE.md](GUIDE.md).
 
 Build options:
 
-- **Pictures**: *Shaded* uses the 8-colour PC-8801 palette, which also renders as
+- **Pictures**: *Shaded* uses the 16-colour PC-8801 palette, which also renders as
   distinct grey, green or amber shades on a monochrome monitor. *Two-colour
   dithered* is the MZ-2000 look: black and white only, with dither patterns
   standing in for mid-tones.
@@ -100,20 +100,6 @@ python sgso_convert.py sg8.zip out --floppy 720K --pictures mono --sound adlib
 - `note/` — architecture, testing and beginner notes
 - `tests/` — `python -m pytest -q`
 
-## Building the DOS programs
-
-The `.EXE` files in `dos/` are already built. To rebuild them you need
-[Open Watcom](https://github.com/open-watcom/open-watcom-v2), then from `dos_src/`:
-
-```
-wcl -bt=dos -ml -0 -ox sg8.c     -fe=../dos/SG8.EXE
-wcl -bt=dos -ms -0 -ox setup.c   -fe=../dos/SETUP.EXE
-wcl -bt=dos -ms -0 -ox install.c -fe=../dos/INSTALL.EXE
-```
-
-If you change anything in `dos_src/`, rebuild before committing: the test suite
-checks that the binaries are not older than their sources.
-
 ## Community
 
 If you want to follow my other projects, my Discord server is here:
@@ -127,13 +113,3 @@ to its owners. Use this only with a copy of the game you own.
 
 My code is MIT licensed (`LICENSE`). `lib/zenglyphs.py` is derived from the IPA
 Gothic font and stays under the IPA Font License (`IPA_Font_License.txt`).
-
-## Smooth / 16-colour build
-
-Smooth rendering is a real 16-colour VGA path, not an 8-colour image with less dithering.
-It uses anti-aliased SVG rasterisation, maps to 16 VGA colours without spatial dithering,
-and writes all four VGA bit planes. Smooth monochrome uses 16 grey/tinted levels.
-
-Because `SG8.IMG` is now four-plane for Smooth builds, `dos/SG8.EXE` must be rebuilt from
-`dos_src/sg8.c` before running a Smooth build. The included `BUILD_DOS_SMOOTH.bat` uses the
-same Open Watcom command line documented below.
