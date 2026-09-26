@@ -156,3 +156,15 @@ def test_planar4_rle_roundtrip_shape():
     blob = convert.planar4_rle(idx)
     assert blob
     assert len(blob) > 0
+
+
+def test_smooth_renderer_forces_full_frame_svg_geometry():
+    source = (ROOT / "lib" / "pc88draw.py").read_text(encoding="utf-8")
+    assert 'preserveAspectRatio="none"' in source
+    assert "output_width=W * ss" in source
+
+
+def test_smooth_dos_path_does_not_replay_vector_strokes():
+    source = (ROOT / "dos_src" / "sg8.c").read_text(encoding="utf-8")
+    assert "if (animate && opt_render_smooth)" in source
+    assert "blit_image();" in source
