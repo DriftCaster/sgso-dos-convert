@@ -60,14 +60,14 @@ def check_install():
                 "or use the single-file sgso_convert.pyz instead.")
 
 APP_NAME = 'SG Variant Space Octet DOS Convert Tool'
-VERSION = '1.5'
+VERSION = '1.8'
 
 # Build choices: (key, label, [(value, choice label)], default index)
 BUILD = [
-    ('pictures', 'Pictures', [('colour', 'Shaded (8-colour PC-8801; shows as grey shades on a mono screen)'),
-                              ('mono', 'Two-colour dithered (MZ-2000 look)')], 0),
+    ('pictures', 'Pictures', [('colour', 'Colour (16-colour VGA)'),
+                              ('mono', 'Monochrome (16 shades)')], 0),
     ('rendering', 'Rendering', [('authentic', 'Authentic (hard edges, as the original)'),
-                                ('smooth', 'Smooth (anti-aliased, not original)')], 0),
+                                ('smooth', 'Smooth (16-colour, anti-aliased, no dithering)')], 0),
     ('floppy', 'Floppy type', [('1.44M', '3.5" 1.44 MB (HD)'), ('720K', '3.5" 720 KB (DD)'),
                                ('1.2M', '5.25" 1.2 MB (HD)'), ('360K', '5.25" 360 KB (DD)'),
                                ('2.88M', '3.5" 2.88 MB (ED)')], 0),
@@ -99,8 +99,7 @@ by coffee.crisp
 ==============================
 
 STEINS;GATE Variant Space Octet, running on DOS the way it looked in its
-PC-8801 mode: 8 colour dithered pictures with scanlines (or the shaded
-monochrome look), the game's own PC-8801 font, the 3 line text window and
+PC-8801 mode: 16-colour VGA pictures in smooth mode, or authentic PC-8801-style dithered pictures, the game's own PC-8801 font, the 3 line text window and
 the function key bar. Music plays on the PC speaker or an AdLib card.
 
 You need an 8086 or better, DOS 3.3+, VGA, about 420 KB of free
@@ -177,6 +176,7 @@ def make_cfg(c):
             lines.append(f"octave={1 if v == 'piezo' else 0}")
         else:
             lines.append(f"{key}={v}")
+    lines.append(f"rendering={c.get('rendering', 'authentic')}")
     return ('\r\n'.join(lines) + '\r\n').encode('ascii')
 
 
@@ -204,8 +204,8 @@ def run(game, outdir, choices, folders=True, images=True, harddisk=True, log=pri
     fmt = c['floppy']
     note = []
     if c['size'] == 'light': note.append("Light set: pictures appear at once.")
-    if c['pictures'] == 'mono': note.append("Two-colour dithered pictures (MZ-2000 look).")
-    if c['rendering'] == 'smooth': note.append("Smooth anti-aliased pictures.")
+    if c['pictures'] == 'mono': note.append("16-shade smooth monochrome." if c['rendering'] == 'smooth' else "Two-colour dithered pictures (MZ-2000 look).")
+    if c['rendering'] == 'smooth': note.append("Smooth 16-colour anti-aliased pictures (no dithering).")
     os.makedirs(outdir, exist_ok=True)
     if folders or images:
         files['INSTALL.TXT'] = b''

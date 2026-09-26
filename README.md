@@ -127,3 +127,13 @@ to its owners. Use this only with a copy of the game you own.
 
 My code is MIT licensed (`LICENSE`). `lib/zenglyphs.py` is derived from the IPA
 Gothic font and stays under the IPA Font License (`IPA_Font_License.txt`).
+
+## Smooth / 16-colour build
+
+Smooth rendering is a real 16-colour VGA path, not an 8-colour image with less dithering.
+It uses anti-aliased SVG rasterisation, maps to 16 VGA colours without spatial dithering,
+and writes all four VGA bit planes. Smooth monochrome uses 16 grey/tinted levels.
+
+Because `SG8.IMG` is now four-plane for Smooth builds, `dos/SG8.EXE` must be rebuilt from
+`dos_src/sg8.c` before running a Smooth build. The included `BUILD_DOS_SMOOTH.bat` uses the
+same Open Watcom command line documented below.
