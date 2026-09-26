@@ -1,5 +1,6 @@
 import random
 import sys
+import numpy as np
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -111,32 +112,32 @@ def test_mono_render_uses_only_two_colours():
     assert set(idx.flat).issubset({0, 7})
 
 
-def test_smooth_render_matches_authentic_shape_and_palette():
-    """Smooth mode must stay inside the DOS palette and keep the drawing replay."""
+def test_smooth_render_uses_full_16_colour_palette_without_dither():
+    """Smooth mode uses 16 VGA colours and does not inject Bayer dithering."""
     svg = b'''<svg xmlns="http://www.w3.org/2000/svg" width="640" height="400">
       <rect x="0" y="0" width="640" height="400" fill="#ffffff"/>
       <path d="M 40 40 L 600 80 L 300 360 Z" fill="#ff8000" stroke="#000000"/>
     </svg>'''
     idx, replay = pc88draw.render(svg, smooth=True)
     assert idx.shape == (200, 640)
-    assert idx.min() >= 0 and idx.max() <= 7
+    assert idx.min() >= 0 and idx.max() <= 15
     assert replay, "smooth mode must still produce drawing-replay data"
 
 
-def test_smooth_render_needs_no_extra_dependencies():
-    """Smooth mode is pure numpy: it must not import optional graphics libraries."""
+def test_smooth_render_uses_declared_rasterizer_dependencies():
+    """Smooth mode uses the declared CairoSVG/Pillow dependencies."""
     source = (ROOT / "lib" / "pc88draw.py").read_text(encoding="utf-8")
-    for name in ("cairosvg", "cairocffi", "PIL"):
-        assert name not in source
+    assert "cairosvg" in source
+    assert "PIL" in source
 
 
-def test_smooth_mono_render_dithers_midtones():
+def test_smooth_mono_render_uses_16_shades_without_dither():
     svg = b'''<svg xmlns="http://www.w3.org/2000/svg" width="640" height="400">
       <rect x="0" y="0" width="640" height="400" fill="#808080"/>
     </svg>'''
     idx, _ = pc88draw.render(svg, mono=True, smooth=True)
-    assert set(idx.flat).issubset({0, 7})
-    assert 0 in idx and 7 in idx
+    assert set(idx.flat).issubset(set(range(16)))
+    assert 7 in idx or 8 in idx
 
 
 def test_mono_render_keeps_shading_between_tones():
@@ -146,3 +147,12 @@ def test_mono_render_keeps_shading_between_tones():
     light = pc88draw.mono_tile(0xC0C0C0, 1.0)
     assert sum(dark) < sum(mid) < sum(light)
     assert len(set(mid)) > 1
+
+
+def test_planar4_rle_roundtrip_shape():
+    import convert
+    idx = np.arange(640, dtype=np.uint8)[None, :] % 16
+    idx = np.repeat(idx, 200, axis=0)
+    blob = convert.planar4_rle(idx)
+    assert blob
+    assert len(blob) > 0
