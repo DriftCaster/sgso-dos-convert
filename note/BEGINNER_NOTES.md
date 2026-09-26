@@ -1,19 +1,25 @@
-# Beginner Notes
+# Beginner notes
 
-This project is a mix of Python and old-school C/DOS code.
+I mainly write GDScript. Python and DOS-era C are not my usual languages, and this
+project was written with AI assistance, so these notes are here to make the code
+readable rather than to assume you already know it.
 
-I mainly work with **GDScript**, so Python and DOS C are less familiar parts of the project. The code was also developed with **AI assistance**. That is why these notes focus on explaining the connections instead of assuming expert knowledge.
+A good reading order:
 
-A useful way to read the project is:
+1. `sgso_convert.py` — start here; it is the whole flow in one file.
+2. `convert.convert_all()` in `lib/convert.py`.
+3. One output at a time: scenarios in `build_scn()`, music in `build_mus()`, the
+   font in `build_font()`, pictures in `build_images()`.
+4. `lib/disks.py` last, because it only packages what the others produced.
+5. `dos_src/*.c` when you want to see how the DOS side reads those files.
 
-1. Start with `sgso_convert.py`.
-2. Read `convert.convert_all()` in `lib/convert.py`.
-3. Follow one output at a time:
-   - scenario → `build_scn()`
-   - music → `build_mus()`
-   - font → `build_font()`
-   - pictures → `build_images()`
-4. Read `lib/disks.py` last because it packages the converted files for DOS.
-5. Read `dos_src/*.c` when you want to understand how the DOS files consume those generated formats.
+Two rules that matter more than anything else here:
 
-When changing code, run the tests before and after the change. Keep the converter's output formats stable unless the matching DOS program is changed too.
+- The Python converter and the DOS programs share file formats. If you change a
+  format on one side, change the other side too, and update
+  `note/ARCHITECTURE.md`.
+- If you edit anything in `dos_src/`, rebuild the `.EXE` files with Open Watcom
+  before committing. A test fails if you forget, because shipping a stale binary
+  has already caused real bugs in this project.
+
+Run `python -m pytest -q` before and after any change.
