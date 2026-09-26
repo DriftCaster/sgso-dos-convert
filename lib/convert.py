@@ -5,7 +5,7 @@ Part of SG Variant Space Octet DOS Convert Tool, by coffee.crisp.
 Usage: python3 sg8conv.py path/to/data.xp3 output_dir
 Produces, following the original engine in its PC-8801 mkIISR mode:
   SG8.SCN  compiled scenarios
-  SG8.IMG  pictures, 640x200 in the 8 digital colours with 2x2 dither tiles
+  SG8.IMG  pictures, 640x200 in 4-plane VGA (16-colour) format
   SG8.VEC  drawing order (strokes and fills) to replay the pictures being drawn
   SG8.FNT  the game's PC-8801 font plus the full-width glyphs used by the text
   SG8.MUS  PC speaker music (one-voice PWM arrangements)
@@ -360,13 +360,13 @@ def packbits(data):
         out += bytes([j - i - 1]) + data[i:j]; i = j
     return bytes(out)
 
-def planar3_rle(idx):
-    """640x200 colour indices 0-7 -> per row, 3 bit planes of 80 bytes, PackBits."""
+def planar4_rle(idx):
+    """640x200 colour indices 0-15 -> per row, 4 VGA bit planes of 80 bytes, PackBits."""
     import numpy as np
-    planes = [np.packbits(((idx >> p) & 1).astype(np.uint8), axis=1) for p in range(3)]
+    planes = [np.packbits(((idx >> p) & 1).astype(np.uint8), axis=1) for p in range(4)]
     out = bytearray()
     for y in range(idx.shape[0]):
-        for p in range(3):
+        for p in range(4):
             out += packbits(planes[p][y].tobytes())
     return bytes(out)
 
@@ -389,7 +389,7 @@ def build_images(files, ctx, log, mono=False, smooth=False):
         if src is None:
             log(f"  missing image skipped: {n}"); imgs.append(b''); vecs.append(b''); continue
         idx, els = pc88draw.render(src, mono, gam.get(n, 1.0), smooth)
-        imgs.append(planar3_rle(idx))
+        imgs.append(planar4_rle(idx))
         out = bytearray()
         for kind, fcols, scol, figs in els:
             polys = [pts + ([pts[0]] if closed and kind == 'line' else []) for pts, closed in figs]

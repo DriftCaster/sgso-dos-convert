@@ -9,8 +9,9 @@ recommended PC-8801 mkIISR mode (sg8bit_paint.tjs / sg8bit.tjs):
 - the canvas starts white (the last palette colour).
 Pure Python + numpy, no graphics library needed.
 
-Returns the final 640x200 image as colour indices 0-7 and the element list used to
-replay the drawing (lines, then fills revealed from the final image).
+Returns the final 640x200 image as palette indices. Authentic colour uses 0-7;
+Smooth colour and Smooth monochrome use the full 16-entry VGA palette. The element
+list is also returned for DOS drawing replay.
 """
 import re
 import xml.etree.ElementTree as ET
@@ -19,12 +20,18 @@ import numpy as np
 W, H = 640, 200
 SCALE_X, SCALE_Y = 1.0, 0.5
 
-# Digital 8-colour palette, in the original index order (bit0 blue, bit1 red, bit2 green)
-PALETTE = [0x000000, 0x0000FF, 0xFF0000, 0xFF00FF, 0x00FF00, 0x00FFFF, 0xFFFF00, 0xFFFFFF]
-_PAL_RGB = [((c >> 16) & 255, (c >> 8) & 255, c & 255) for c in PALETTE]
-_PAL_POS = [(0.29891 * r / 255, 0.58661 * g / 255, 0.11448 * b / 255) for r, g, b in _PAL_RGB]
+# Original PC-8801 digital palette used by Authentic mode.
+PC88_PALETTE = [0x000000, 0x0000FF, 0xFF0000, 0xFF00FF,
+                0x00FF00, 0x00FFFF, 0xFFFF00, 0xFFFFFF]
+# Standard 16-colour VGA palette used by Smooth mode.
+VGA_PALETTE = [0x000000, 0x0000AA, 0x00AA00, 0x00AAAA,
+               0xAA0000, 0xAA00AA, 0xAA5500, 0xAAAAAA,
+               0x555555, 0x5555FF, 0x55FF55, 0x55FFFF,
+               0xFF5555, 0xFF55FF, 0xFFFF55, 0xFFFFFF]
+_PC88_RGB = [((c >> 16) & 255, (c >> 8) & 255, c & 255) for c in PC88_PALETTE]
+_VGA_RGB = [((c >> 16) & 255, (c >> 8) & 255, c & 255) for c in VGA_PALETTE]
+_PAL_POS = [(0.29891 * r / 255, 0.58661 * g / 255, 0.11448 * b / 255) for r, g, b in _PC88_RGB]
 DITH_COEF = [0.0, 0.25, 0.5, 0.0]
-
 
 def _col2rgb(col):
     return ((col >> 16) & 255) / 255.0, ((col >> 8) & 255) / 255.0, (col & 255) / 255.0
@@ -53,7 +60,7 @@ def dither_tile(col):
         c = rgb2digit(r + dr * f, g + dg * f, b + db * f)
         cols.append(c)
         if i == 0:
-            pr, pg, pb = (v / 255.0 for v in _PAL_RGB[c])
+            pr, pg, pb = (v / 255.0 for v in _PC88_RGB[c])
             dr, dg, db = r - pr, g - pg, b - pb
     return cols
 
@@ -295,54 +302,59 @@ def _bayer(h, w):
     return np.tile(BAYER4, (h // 4 + 1, w // 4 + 1))[:h, :w]
 
 
-def _quantize(rgb, mono, gamma):
-    """Supersampled RGB -> palette indices, with ordered dithering so that
-    smooth gradients keep their shading instead of banding."""
+def _quantize(rgb, mono, gamma, dither=False):
+    """Map anti-aliased RGB to the 16-entry VGA palette.
+
+    Smooth mode deliberately does *not* dither: dithering was the reason the
+    previous smooth output looked noisy. Authentic mode keeps the original
+    PC-8801 2x2 dither path separately.
+    """
     h, w = rgb.shape[:2]
     if mono:
         lum = rgb @ np.array([0.29891, 0.58661, 0.11448], dtype=np.float32)
         if gamma != 1.0:
             lum = np.clip(lum, 0.0, 1.0) ** (1.0 / gamma)
-        return np.where(lum + _bayer(h, w) * (1.0 / 1.5) >= 0.5, 7, 0).astype(np.uint8)
-    noise = _bayer(h, w)[:, :, None] * 0.5
-    pal = np.asarray(_PAL_RGB, dtype=np.float32) / 255.0
-    d = np.clip(rgb + noise, 0.0, 1.0)[:, :, None, :] - pal[None, None, :, :]
+        # 16 shades, no spatial dithering.
+        return np.clip(np.rint(lum * 15.0), 0, 15).astype(np.uint8)
+    pal = np.asarray(_VGA_RGB, dtype=np.float32) / 255.0
+    src = np.clip(rgb, 0.0, 1.0)
+    d = src[:, :, None, :] - pal[None, None, :, :]
     return np.argmin(np.sum(d * d, axis=3), axis=2).astype(np.uint8)
 
 
-def _render_smooth(elements, mono, gamma, ss=3):
-    """Draws the fills at ss times the resolution in full RGB, averages them back
-    down to 640x200 and dithers them into the palette, then lays the strokes on top
-    at the final resolution so outlines stay sharp. Anti-aliased, so not how the
-    original hardware drew it -- an optional enhancement."""
-    big = np.ones((H * ss, W * ss, 3), dtype=np.float32)      # white canvas
-    for fill, stroke, figs in elements:
-        if fill is not None:
-            _fill_rgb(big, figs, np.array(_col2rgb(fill), dtype=np.float32), ss)
-        elif stroke is not None:
-            col = np.array(_col2rgb(stroke), dtype=np.float32)
-            for pts, closed in figs:
-                seq = pts + ([pts[0]] if closed else [])
-                for (ax, ay), (bx, by) in zip(seq, seq[1:]):
-                    _line_rgb(big, ax, ay, bx, by, col, ss)
-    img = _quantize(big.reshape(H, ss, W, ss, 3).mean(axis=(1, 3)), mono, gamma)
-    for fill, stroke, figs in elements:
-        if stroke is None:
-            continue
-        c = mono_line(stroke) if mono else line_colour(stroke)
-        for pts, closed in figs:
-            seq = pts + ([pts[0]] if closed else [])
-            if len(seq) == 1:
-                _line(img, seq[0][0], seq[0][1], seq[0][0], seq[0][1], c)
-            for (ax, ay), (bx, by) in zip(seq, seq[1:]):
-                _line(img, ax, ay, bx, by, c)
-    return img
+def _render_smooth(svg_bytes, mono, gamma, ss=2):
+    """Render the source SVG with a real anti-aliased rasterizer, then reduce it
+    to 640x200 and map it to 16 VGA colours. No spatial dithering is applied."""
+    try:
+        import io
+        import cairosvg
+        from PIL import Image
+    except ImportError as exc:
+        raise RuntimeError(
+            "Smooth rendering requires cairosvg and pillow; install requirements.txt"
+        ) from exc
 
+    # The game SVGs contain a custom entity-heavy DOCTYPE that CairoSVG rejects.
+    # Use the same sanitisation rules as the original parser before rasterising.
+    svg_text = svg_bytes.decode("utf-8", "replace")
+    svg_text = re.sub(r'<!DOCTYPE.*?\]>', '', svg_text, flags=re.S)
+    svg_text = re.sub(r'&ns_[a-z_]+;', 'http://ns.invalid/', svg_text)
+    svg_text = re.sub(r'\s(i|x|graph|sfw|a):[\w-]+="[^"]*"', '', svg_text)
+    png = cairosvg.svg2png(
+        bytestring=svg_text.encode("utf-8"),
+        output_width=W * ss,
+        output_height=H * ss,
+        background_color="white",
+    )
+    im = Image.open(io.BytesIO(png)).convert("RGB")
+    im = im.resize((W, H), Image.Resampling.LANCZOS)
+    rgb = np.asarray(im, dtype=np.float32) / 255.0
+    return _quantize(rgb, mono, gamma)
 
 def render(svg_bytes, mono=False, gamma=1.0, smooth=False):
-    """mono: two-colour rendering of the green-monitor machines; gamma: the picture's
-    monochrome gamma correction (evimage/_cgprops.tjs); smooth: anti-aliased
-    rendering instead of the original's hard-edged one.
+    """mono: monochrome rendering; authentic mono keeps the original two-colour
+    dither while smooth mono uses 16 shades. gamma applies to monochrome levels.
+    smooth: anti-aliased 16-colour VGA rendering without spatial dithering.
 
     Returns the 640x200 picture as palette indices and the element list used to
     replay the drawing on DOS."""
@@ -368,13 +380,13 @@ def render(svg_bytes, mono=False, gamma=1.0, smooth=False):
         replay.append(('fill' if fill is not None else 'line', fcols, scol, figs))
 
     if smooth:
-        img = _render_smooth(elements, mono, gamma)
+        img = _render_smooth(svg_bytes, mono, gamma)
     return img, replay
 
 
 def to_rgb(idx, scanlines=True):
     """Preview: 640x400 RGB with the original's scanline blind (odd rows at 25%)."""
-    pal = np.array(_PAL_RGB, dtype=np.uint8)
+    pal = np.array(_VGA_RGB, dtype=np.uint8)
     img = pal[idx]
     out = np.repeat(img, 2, axis=0)
     if scanlines:
