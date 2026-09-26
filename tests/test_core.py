@@ -78,40 +78,71 @@ def test_floppy_plan_rejects_missing_ordered_file():
         raise AssertionError("missing file was accepted")
 
 
-def test_pc88draw_smooth_optional():
-    # Smooth mode is optional and must not become a requirement for normal use.
-    try:
-        import cairosvg  # noqa: F401
-        import PIL  # noqa: F401
-    except ImportError:
-        return
-    svg = b'''<svg xmlns="http://www.w3.org/2000/svg" width="640" height="400">
-      <rect x="0" y="0" width="640" height="400" fill="#ffffff"/>
-      <path d="M 40 40 L 600 80 L 300 360 Z" fill="#ff0000"/>
-    </svg>'''
-    idx, elements = pc88draw.render(svg, smooth=True)
-    assert idx.shape == (200, 640)
-    assert idx.min() >= 0 and idx.max() <= 7
-    assert elements == []
-
-
-def test_pc88draw_smooth_monochrome_optional():
-    try:
-        import cairosvg  # noqa: F401
-        import PIL  # noqa: F401
-    except ImportError:
-        return
-    svg = b'''<svg xmlns="http://www.w3.org/2000/svg" width="640" height="400">
-      <rect x="0" y="0" width="640" height="400" fill="#808080"/>
-    </svg>'''
-    idx, elements = pc88draw.render(svg, mono=True, smooth=True)
-    assert idx.shape == (200, 640)
-    assert set(idx.flat).issubset({0, 7})
-    assert elements == []
-
-
 def test_text_runtime_has_no_silent_token_overflow():
     source = (ROOT / "dos_src" / "sg8.c").read_text(encoding="utf-8")
     assert "static Tok t[1024]" in source
     assert "m < 1024 - 1" in source
     assert "m < 1024 - MAX_INPUT" in source
+
+
+def test_text_runtime_flushes_stale_keys_before_typing():
+    source = (ROOT / "dos_src" / "sg8.c").read_text(encoding="utf-8")
+    assert "static void kbd_flush(void)" in source
+    assert "if (typed) { kbd_flush(); due = now_ms(); }" in source
+
+
+def test_dos_binaries_match_their_sources():
+    """The shipped .EXE files must be newer than the .c files they come from."""
+    for exe, src in (("SG8.EXE", "sg8.c"), ("SETUP.EXE", "setup.c"), ("INSTALL.EXE", "install.c")):
+        exe_path = ROOT / "dos" / exe
+        src_path = ROOT / "dos_src" / src
+        assert exe_path.exists(), f"{exe} is missing from dos/"
+        assert exe_path.stat().st_mtime >= src_path.stat().st_mtime, (
+            f"{exe} is older than {src}: rebuild it with Open Watcom "
+            f"(see note/TESTING.md) before committing")
+
+
+def test_mono_render_uses_only_two_colours():
+    svg = b'''<svg xmlns="http://www.w3.org/2000/svg" width="640" height="400">
+      <rect x="0" y="0" width="640" height="400" fill="#808080"/>
+      <rect x="100" y="100" width="200" height="100" fill="#c0c0c0"/>
+    </svg>'''
+    idx, _ = pc88draw.render(svg, mono=True)
+    assert set(idx.flat).issubset({0, 7})
+
+
+def test_smooth_render_matches_authentic_shape_and_palette():
+    """Smooth mode must stay inside the DOS palette and keep the drawing replay."""
+    svg = b'''<svg xmlns="http://www.w3.org/2000/svg" width="640" height="400">
+      <rect x="0" y="0" width="640" height="400" fill="#ffffff"/>
+      <path d="M 40 40 L 600 80 L 300 360 Z" fill="#ff8000" stroke="#000000"/>
+    </svg>'''
+    idx, replay = pc88draw.render(svg, smooth=True)
+    assert idx.shape == (200, 640)
+    assert idx.min() >= 0 and idx.max() <= 7
+    assert replay, "smooth mode must still produce drawing-replay data"
+
+
+def test_smooth_render_needs_no_extra_dependencies():
+    """Smooth mode is pure numpy: it must not import optional graphics libraries."""
+    source = (ROOT / "lib" / "pc88draw.py").read_text(encoding="utf-8")
+    for name in ("cairosvg", "cairocffi", "PIL"):
+        assert name not in source
+
+
+def test_smooth_mono_render_dithers_midtones():
+    svg = b'''<svg xmlns="http://www.w3.org/2000/svg" width="640" height="400">
+      <rect x="0" y="0" width="640" height="400" fill="#808080"/>
+    </svg>'''
+    idx, _ = pc88draw.render(svg, mono=True, smooth=True)
+    assert set(idx.flat).issubset({0, 7})
+    assert 0 in idx and 7 in idx
+
+
+def test_mono_render_keeps_shading_between_tones():
+    """Mid-tones must survive as dither patterns, not collapse to solid black/white."""
+    dark = pc88draw.mono_tile(0x303030, 1.0)
+    mid = pc88draw.mono_tile(0x808080, 1.0)
+    light = pc88draw.mono_tile(0xC0C0C0, 1.0)
+    assert sum(dark) < sum(mid) < sum(light)
+    assert len(set(mid)) > 1
