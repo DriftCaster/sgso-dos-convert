@@ -68,6 +68,7 @@ static int  opt_chms = 25;          /* delay per character (ms), 0 = instant */
 static int  opt_chse = 1;           /* typing beep per character */
 static int  opt_scan = 1;           /* darkened odd lines (the original's scanline blind) */
 static int  opt_colour = -1;        /* -1 auto, 0 grey, 1 colour, 2 green, 3 amber monitor */
+static int  opt_render_smooth = 0;  /* 16-colour anti-aliased pictures; disables scanline dark-copy mode */
 /* Volume per sound type: 0 off, 1 soft, 2 loud. The PC speaker has only two states;
    "soft" replaces the square wave with very short pulses (PIT mode 2). */
 enum { VOL_MUSIC, VOL_TYPING, VOL_EFFECTS };
@@ -180,17 +181,35 @@ static void set_palette(void)
     }
     r.x.ax = 0x1001; r.h.bh = 0; int86(0x10, &r, &r);     /* black border */
     for (i = 0; i < 16; i++) {
-        int c = i & 7;
-        double rr = (c & 2) ? 1.0 : 0.0, gg = (c & 4) ? 1.0 : 0.0, bb = (c & 1) ? 1.0 : 0.0;
-        double k = (i & 8) ? 63.0 / 255.0 : 1.0;
-        if (mode != 1) {
-            double y = 0.299 * rr + 0.587 * gg + 0.114 * bb;
+        double rr, gg, bb;
+        if (opt_render_smooth && mode == 1) {
+            /* Standard 16-colour VGA palette for smooth colour mode. */
+            static const u8 vga16[16][3] = {
+                {0,0,0},{0,0,42},{0,42,0},{0,42,42},
+                {42,0,0},{42,0,42},{42,21,0},{42,42,42},
+                {21,21,21},{21,21,63},{21,63,21},{21,63,63},
+                {63,21,21},{63,21,63},{63,63,21},{63,63,63}
+            };
+            rr = vga16[i][0] / 63.0; gg = vga16[i][1] / 63.0; bb = vga16[i][2] / 63.0;
+        } else if (opt_render_smooth && mode != 1) {
+            /* Sixteen real monochrome levels, tinted for green/amber modes. */
+            double y = (double)i / 15.0;
             if (opt_gamma != 1.0 && y > 0) y = pow(y, 1.0 / opt_gamma);
             rr = y * tint[mode][0]; gg = y * tint[mode][1]; bb = y * tint[mode][2];
+        } else {
+            int c = i & 7;
+            double k = (i & 8) ? 63.0 / 255.0 : 1.0;
+            rr = (c & 2) ? 1.0 : 0.0; gg = (c & 4) ? 1.0 : 0.0; bb = (c & 1) ? 1.0 : 0.0;
+            if (mode != 1) {
+                double y = 0.299 * rr + 0.587 * gg + 0.114 * bb;
+                if (opt_gamma != 1.0 && y > 0) y = pow(y, 1.0 / opt_gamma);
+                rr = y * tint[mode][0]; gg = y * tint[mode][1]; bb = y * tint[mode][2];
+            }
+            rr *= k; gg *= k; bb *= k;
         }
-        dac[i * 3]     = (u8)(rr * k * 63.0 + 0.5);
-        dac[i * 3 + 1] = (u8)(gg * k * 63.0 + 0.5);
-        dac[i * 3 + 2] = (u8)(bb * k * 63.0 + 0.5);
+        dac[i * 3]     = (u8)(rr * 63.0 + 0.5);
+        dac[i * 3 + 1] = (u8)(gg * 63.0 + 0.5);
+        dac[i * 3 + 2] = (u8)(bb * 63.0 + 0.5);
     }
     segread(&s);
     r.x.ax = 0x1012; r.x.bx = 0; r.x.cx = 16;
@@ -211,7 +230,7 @@ static void vga_mask(u8 m) { outp(0x3C4, 2); outp(0x3C5, m); }
 /* Colour actually used on screen line y (odd lines darkened). */
 static u8 rowc(u8 c, int y)
 {
-    return (u8)((opt_scan && (y & 1)) ? (c | 8) : c);
+    return (u8)((!opt_render_smooth && opt_scan && (y & 1)) ? (c | 8) : c);
 }
 
 static void vga_clear_rows(int y0, int n)
@@ -616,6 +635,7 @@ static void load_config(void)
         *v++ = 0;
         if (!stricmp(line, "screen")) opt_colour = (k = cfg_pick(v, scr_names, 4)) >= 0 ? k : -1;
         else if (!stricmp(line, "scanlines")) opt_scan = !stricmp(v, "on");
+        else if (!stricmp(line, "rendering")) { opt_render_smooth = !stricmp(v, "smooth"); if (opt_render_smooth) opt_scan = 0; }
         else if (!stricmp(line, "draw")) opt_speed = atoi(v) < 0 ? 0 : atoi(v) > 3 ? 3 : atoi(v);
         else if (!stricmp(line, "textspeed")) opt_chms = atoi(v) < 0 ? 0 : atoi(v);
         else if (!stricmp(line, "typing")) opt_chse = !stricmp(v, "on");
@@ -977,7 +997,7 @@ static void wait_ms(u16 ms)
 #define PLANE_SIZE ((u16)PIC_H * 80)
 #define MAX_EDGES  2000
 
-static u8 far *plane[3];
+static u8 far *plane[4];
 static FILE *vec_fp;
 static u16  vec_count;
 static u32 far *vec_off;
@@ -999,14 +1019,16 @@ static void blit_row(int y)
     u8 far *d0 = VGA + (u16)(2 * y) * 80;
     u8 far *d1 = d0 + 80;
     int p;
-    for (p = 0; p < 3; p++) {
+    for (p = 0; p < 4; p++) {
         vga_mask((u8)(1 << p));
         _fmemcpy(d0, plane[p] + (u16)y * 80, 80);
         _fmemcpy(d1, plane[p] + (u16)y * 80, 80);
     }
-    vga_mask(8);
-    _fmemset(d0, 0, 80);
-    _fmemset(d1, opt_scan ? 0xFF : 0, 80);
+    if (!opt_render_smooth) {
+        vga_mask(8);
+        _fmemset(d0, 0, 80);
+        _fmemset(d1, opt_scan ? 0xFF : 0, 80);
+    }
     vga_mask(15);
 }
 
@@ -1024,7 +1046,7 @@ static int decode_image(int id)
     if (id < 0 || id >= (int)img_count || !(off = img_off[id])) return 0;
     fseek(img_fp, off, SEEK_SET);
     for (y = 0; y < PIC_H; y++) {
-        for (p = 0; p < 3; p++) {
+        for (p = 0; p < 4; p++) {
             n = 0;
             while (n < 80) {
                 c = getc(img_fp);
@@ -1126,8 +1148,8 @@ static void copy_span(int y, int xa, int xb)
             if (b == b1) m &= (u8)(0xFF << (7 - (xb & 7)));
             outp(0x3CE, 8); outp(0x3CF, m);
             latch = VGA[line + b];
-            for (p = 0; p < 3; p++) { vga_mask((u8)(1 << p)); VGA[line + b] = plane[p][(u16)y * 80 + b]; }
-            vga_mask(8); VGA[line + b] = (u8)((half && opt_scan) ? 0xFF : 0);
+            for (p = 0; p < 4; p++) { vga_mask((u8)(1 << p)); VGA[line + b] = plane[p][(u16)y * 80 + b]; }
+            if (!opt_render_smooth) { vga_mask(8); VGA[line + b] = (u8)((half && opt_scan) ? 0xFF : 0); }
         }
     }
     (void)latch;
@@ -1304,7 +1326,7 @@ static void open_vec(void)
     char magic[5] = { 0 };
     u16 i;
     int p;
-    for (p = 0; p < 3; p++)
+    for (p = 0; p < 4; p++)
         if (!(plane[p] = (u8 far *)_fmalloc(PLANE_SIZE))) fatal("not enough memory (image)");
     vec_fp = fopen("SG8.VEC", "rb");
     if (!vec_fp) return;
@@ -1912,6 +1934,7 @@ int main(int argc, char **argv)
 {
     int i;
     load_config();
+    if (opt_render_smooth) opt_scan = 0;
     for (i = 1; i < argc; i++) {
         char *a = argv[i];
         if (a[0] == '/' || a[0] == '-') a++;
