@@ -1304,6 +1304,18 @@ static void draw_image(int id, int animate)
         clear_image();
         return;
     }
+
+    /*
+     * Smooth pictures are already anti-aliased final frames. Replaying the
+     * authentic vector strokes over them can temporarily put a stroke across
+     * a character/object before a later fill covers it. Keep vector replay
+     * for Authentic mode, but show the completed Smooth frame directly.
+     */
+    if (animate && opt_render_smooth) {
+        blit_image();
+        return;
+    }
+
     if (animate && opt_speed && vec_fp && timer_hooked && id < (int)vec_count && vec_off[id])
         animate_image(id);
     blit_image();
