@@ -102,7 +102,7 @@ def fat12_image(files, label, fmt='1.44M'):
     boot[43:54] = label.upper()[:11].ljust(11).encode('ascii')
     boot[54:62] = b'FAT12   '
     # boot code: print a message, wait for a key, then try the next boot device
-    msg = b'This is a data disk (SG Space Octet DOS). Insert a system disk.\r\n\0'
+    msg = b'This is a data disk (SG Variant Space Octet DOS). Insert a system disk.\r\n\0'
     code = bytearray([0xFA, 0x31, 0xC0, 0x8E, 0xD8, 0x8E, 0xD0, 0xBC, 0x00, 0x7C, 0xFB,
                       0xBE, 0x00, 0x00,
                       0xAC, 0x08, 0xC0, 0x74, 0x09, 0xB4, 0x0E, 0xBB, 0x07, 0x00, 0xCD, 0x10,

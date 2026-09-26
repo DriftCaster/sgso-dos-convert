@@ -206,70 +206,17 @@ def _line(img, x0, y0, x1, y1, c):
         if e2 >= dy: err += dy; x0 += sx
         if e2 <= dx: err += dx; y0 += sy
 
-def _smooth_rgb(svg_bytes, gamma=1.0, mono=False):
-    """Render the source SVG with CairoSVG for an enhanced, anti-aliased image.
-
-    This is intentionally separate from the original PC-8801 renderer.  The
-    DOS image format still has an 8-colour palette, so the RGB result is
-    reduced back to that palette by ``render(..., smooth=True)``.
-    """
-    try:
-        import cairosvg
-        from PIL import Image
-        import io
-    except ImportError as exc:
-        raise RuntimeError(
-            "Smooth / Enhanced rendering needs CairoSVG and Pillow. "
-            "Install them with: pip install cairosvg pillow"
-        ) from exc
-
-    # Render at 2x and downsample.  This gives Cairo more information at
-    # polygon edges before the result is reduced to the DOS palette.
-    png = cairosvg.svg2png(bytestring=svg_bytes, output_width=W * 2, output_height=H * 2)
-    image = Image.open(io.BytesIO(png)).convert("RGB")
-    image = image.resize((W, H), Image.Resampling.LANCZOS)
-    rgb = np.asarray(image, dtype=np.float32) / 255.0
-
-    if gamma != 1.0:
-        rgb = np.clip(rgb, 0.0, 1.0) ** (1.0 / gamma)
-
-    # Quantize the enhanced image into the selected DOS palette.  Anti-aliased
-    # edge pixels therefore never introduce unsupported colours.
-    if mono:
-        lum = np.sum(rgb * np.asarray([0.29891, 0.58661, 0.11448], dtype=np.float32), axis=2)
-        return np.where(lum >= 0.5, 7, 0).astype(np.uint8)
-
-    pal = np.asarray(_PAL_RGB, dtype=np.float32) / 255.0
-    lum_weights = np.asarray([0.29891, 0.58661, 0.11448], dtype=np.float32)
-    # Use RGB distance for the enhanced renderer; this preserves coloured edges
-    # better than the historical luminance-only palette selection.
-    diff = rgb[:, :, None, :] - pal[None, None, :, :]
-    dist = np.sum(diff * diff, axis=3)
-    return np.argmin(dist, axis=2).astype(np.uint8)
-
-
-
-def render(svg_bytes, mono=False, gamma=1.0, smooth=False):
-    """mono: two-colour rendering of the green-monitor machines; gamma: the picture's
-    monochrome gamma correction (evimage/_cgprops.tjs)."""
-    if smooth:
-        # Enhanced mode uses a modern SVG renderer, while the normal path below
-        # remains the byte-for-byte-oriented PC-8801/MZ rendering logic.
-        idx = _smooth_rgb(svg_bytes, gamma, mono=mono)
-        # Smooth mode is an enhanced final-image mode; there is no faithful
-        # vector replay to attach to it.
-        return idx, []
-
+def _parse(svg_bytes):
+    """SVG -> list of (fill colour or None, stroke colour or None, figures).
+    Figures are (points, closed) in 640x200 coordinates, in document order."""
     s = svg_bytes.decode('utf-8', 'replace')
     s = re.sub(r'<!DOCTYPE.*?\]>', '', s, flags=re.S)
     s = re.sub(r'&ns_[a-z_]+;', 'http://ns.invalid/', s)
     s = re.sub(r'\s(i|x|graph|sfw|a):[\w-]+="[^"]*"', '', s)
     root = ET.fromstring(s)
-
-    img = np.full((H, W), 7, dtype=np.uint8)       # white canvas
     ox = _num(root.get('x')); oy = _num(root.get('y'))
 
-    elements = []
+    out = []
     for el in root.iter():
         tag = el.tag.split('}')[-1]
         if tag not in ('polygon', 'polyline', 'rect', 'line', 'path'):
@@ -290,25 +237,139 @@ def render(svg_bytes, mono=False, gamma=1.0, smooth=False):
                       (_num(el.get('x2')) * SCALE_X, _num(el.get('y2')) * SCALE_Y)], False)]
         elif tag == 'path':
             figs = _path(el.get('d'))
-        if not figs or (fill is None and stroke is None):
-            continue
+        if figs and (fill is not None or stroke is not None):
+            out.append((fill, stroke, figs))
+    return out
 
+
+def _fill_rgb(img, figs, rgb, ss):
+    """Scanline fill into a supersampled RGB buffer."""
+    h, w = img.shape[:2]
+    edges = []
+    for pts, _closed in figs:
+        n = len(pts)
+        for k in range(n):
+            (x0, y0), (x1, y1) = pts[k], pts[(k + 1) % n]
+            x0, y0, x1, y1 = x0 * ss, y0 * ss, x1 * ss, y1 * ss
+            if y0 != y1:
+                edges.append((x0, y0, x1, y1) if y0 < y1 else (x1, y1, x0, y0))
+    if not edges:
+        return
+    ymin = max(0, int(np.ceil(min(e[1] for e in edges))))
+    ymax = min(h - 1, int(np.ceil(max(e[3] for e in edges))) - 1)
+    for y in range(ymin, ymax + 1):
+        xs = sorted(x0 + (y - y0) * (x1 - x0) / (y1 - y0)
+                    for x0, y0, x1, y1 in edges if y0 <= y < y1)
+        for k in range(0, len(xs) - 1, 2):
+            a = max(0, int(np.ceil(xs[k])))
+            b = min(w, int(np.ceil(xs[k + 1])))
+            if b > a:
+                img[y, a:b] = rgb
+
+
+def _line_rgb(img, x0, y0, x1, y1, rgb, ss):
+    """Stroke into a supersampled RGB buffer, ss pixels wide (the original's
+    doubled 1-pixel line, scaled up)."""
+    h, w = img.shape[:2]
+    x0, y0, x1, y1 = (int(round(v * ss)) for v in (x0, y0, x1, y1))
+    dx, dy = abs(x1 - x0), -abs(y1 - y0)
+    sx, sy = (1 if x0 < x1 else -1), (1 if y0 < y1 else -1)
+    err = dx + dy
+    while True:
+        if 0 <= y0 < h:
+            a = max(0, x0); b = min(w, x0 + 2 * ss)
+            if b > a:
+                img[y0, a:b] = rgb
+        if x0 == x1 and y0 == y1:
+            break
+        e2 = 2 * err
+        if e2 >= dy: err += dy; x0 += sx
+        if e2 <= dx: err += dx; y0 += sy
+
+
+BAYER4 = np.array([[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]],
+                  dtype=np.float32) / 16.0 - 0.5
+
+
+def _bayer(h, w):
+    return np.tile(BAYER4, (h // 4 + 1, w // 4 + 1))[:h, :w]
+
+
+def _quantize(rgb, mono, gamma):
+    """Supersampled RGB -> palette indices, with ordered dithering so that
+    smooth gradients keep their shading instead of banding."""
+    h, w = rgb.shape[:2]
+    if mono:
+        lum = rgb @ np.array([0.29891, 0.58661, 0.11448], dtype=np.float32)
+        if gamma != 1.0:
+            lum = np.clip(lum, 0.0, 1.0) ** (1.0 / gamma)
+        return np.where(lum + _bayer(h, w) * (1.0 / 1.5) >= 0.5, 7, 0).astype(np.uint8)
+    noise = _bayer(h, w)[:, :, None] * 0.5
+    pal = np.asarray(_PAL_RGB, dtype=np.float32) / 255.0
+    d = np.clip(rgb + noise, 0.0, 1.0)[:, :, None, :] - pal[None, None, :, :]
+    return np.argmin(np.sum(d * d, axis=3), axis=2).astype(np.uint8)
+
+
+def _render_smooth(elements, mono, gamma, ss=3):
+    """Draws the fills at ss times the resolution in full RGB, averages them back
+    down to 640x200 and dithers them into the palette, then lays the strokes on top
+    at the final resolution so outlines stay sharp. Anti-aliased, so not how the
+    original hardware drew it -- an optional enhancement."""
+    big = np.ones((H * ss, W * ss, 3), dtype=np.float32)      # white canvas
+    for fill, stroke, figs in elements:
+        if fill is not None:
+            _fill_rgb(big, figs, np.array(_col2rgb(fill), dtype=np.float32), ss)
+        elif stroke is not None:
+            col = np.array(_col2rgb(stroke), dtype=np.float32)
+            for pts, closed in figs:
+                seq = pts + ([pts[0]] if closed else [])
+                for (ax, ay), (bx, by) in zip(seq, seq[1:]):
+                    _line_rgb(big, ax, ay, bx, by, col, ss)
+    img = _quantize(big.reshape(H, ss, W, ss, 3).mean(axis=(1, 3)), mono, gamma)
+    for fill, stroke, figs in elements:
+        if stroke is None:
+            continue
+        c = mono_line(stroke) if mono else line_colour(stroke)
+        for pts, closed in figs:
+            seq = pts + ([pts[0]] if closed else [])
+            if len(seq) == 1:
+                _line(img, seq[0][0], seq[0][1], seq[0][0], seq[0][1], c)
+            for (ax, ay), (bx, by) in zip(seq, seq[1:]):
+                _line(img, ax, ay, bx, by, c)
+    return img
+
+
+def render(svg_bytes, mono=False, gamma=1.0, smooth=False):
+    """mono: two-colour rendering of the green-monitor machines; gamma: the picture's
+    monochrome gamma correction (evimage/_cgprops.tjs); smooth: anti-aliased
+    rendering instead of the original's hard-edged one.
+
+    Returns the 640x200 picture as palette indices and the element list used to
+    replay the drawing on DOS."""
+    elements = _parse(svg_bytes)
+
+    img = np.full((H, W), 7, dtype=np.uint8)       # white canvas
+    replay = []
+    for fill, stroke, figs in elements:
         fcols = scol = None
         if fill is not None:
             fcols = mono_tile(fill, gamma) if mono else dither_tile(fill)
-            _fill(img, figs, fcols)
+            if not smooth:
+                _fill(img, figs, fcols)
         if stroke is not None:
             scol = mono_line(stroke) if mono else line_colour(stroke)
-            for pts, closed in figs:
-                seq = pts + ([pts[0]] if closed else [])
-                if len(seq) == 1:
-                    _line(img, seq[0][0], seq[0][1], seq[0][0], seq[0][1], scol)
-                for (ax, ay), (bx, by) in zip(seq, seq[1:]):
-                    _line(img, ax, ay, bx, by, scol)
-        elements.append(('fill' if fill is not None else 'line', fcols, scol, figs))
+            if not smooth:
+                for pts, closed in figs:
+                    seq = pts + ([pts[0]] if closed else [])
+                    if len(seq) == 1:
+                        _line(img, seq[0][0], seq[0][1], seq[0][0], seq[0][1], scol)
+                    for (ax, ay), (bx, by) in zip(seq, seq[1:]):
+                        _line(img, ax, ay, bx, by, scol)
+        replay.append(('fill' if fill is not None else 'line', fcols, scol, figs))
 
-    idx = img
-    return idx, elements
+    if smooth:
+        img = _render_smooth(elements, mono, gamma)
+    return img, replay
 
 
 def to_rgb(idx, scanlines=True):

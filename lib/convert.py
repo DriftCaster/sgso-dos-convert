@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Converts STEINS;GATE 8bit (EN) data.xp3 into files for SG8.EXE (DOS).
-Part of SG Space Octet DOS Convert Tool, by coffee.crisp.
+Part of SG Variant Space Octet DOS Convert Tool, by coffee.crisp.
 
 Usage: python3 sg8conv.py path/to/data.xp3 output_dir
 Produces, following the original engine in its PC-8801 mkIISR mode:
@@ -378,9 +378,9 @@ def parse_gamma(files):
     return g
 
 def build_images(files, ctx, log, mono=False, smooth=False):
-    """SG8.IMG (final pictures) and SG8.VEC (element order for the drawing replay),
-    rendered with the authentic PC-8801/MZ logic, or with the optional enhanced
-    anti-aliased SVG renderer. Enhanced mode is reduced to the DOS 8-colour palette."""
+    """SG8.IMG (final pictures) and SG8.VEC (element order for the drawing replay).
+    Pictures use the original engine's hard-edged renderer, or the optional
+    anti-aliased one; both keep each picture's gamma correction (see pc88draw.py)."""
     import pc88draw
     gam = parse_gamma(files)
     imgs, vecs = [], []
@@ -388,7 +388,7 @@ def build_images(files, ctx, log, mono=False, smooth=False):
         src = files.get(f'evimage/{n}.svg')
         if src is None:
             log(f"  missing image skipped: {n}"); imgs.append(b''); vecs.append(b''); continue
-        idx, els = pc88draw.render(src, mono, gam.get(n, 1.0), smooth=smooth)
+        idx, els = pc88draw.render(src, mono, gam.get(n, 1.0), smooth)
         imgs.append(planar3_rle(idx))
         out = bytearray()
         for kind, fcols, scol, figs in els:
