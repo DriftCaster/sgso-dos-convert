@@ -340,6 +340,19 @@ def _render_smooth(svg_bytes, mono, gamma, ss=2):
     svg_text = re.sub(r'<!DOCTYPE.*?\]>', '', svg_text, flags=re.S)
     svg_text = re.sub(r'&ns_[a-z_]+;', 'http://ns.invalid/', svg_text)
     svg_text = re.sub(r'\s(i|x|graph|sfw|a):[\w-]+="[^"]*"', '', svg_text)
+
+    # Match the authentic renderer's fixed-frame geometry.  SVG's default
+    # preserveAspectRatio="xMidYMid meet" can otherwise add letterbox margins
+    # when a source viewBox has a different aspect ratio.
+    svg_text = re.sub(
+        r'<svg\b([^>]*)>',
+        lambda m: '<svg' + m.group(1) +
+                  (' preserveAspectRatio="none"'
+                   if 'preserveAspectRatio=' not in m.group(1) else '') + '>',
+        svg_text,
+        count=1,
+    )
+
     png = cairosvg.svg2png(
         bytestring=svg_text.encode("utf-8"),
         output_width=W * ss,
